@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>天津卫星地图+区划边界（OpenLayers 原生版）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css">
+  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+    /* 新增：缩放层级显示样式 */
+    #zoom-level {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 8px 15px;
+      border-radius: 4px;
+      font-size: 14px;
+      z-index: 1000;
+      font-family: Arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<!-- 新增：缩放层级显示容器 -->
+<div id="zoom-level">当前缩放层级：10</div>
+
+<script>
+
+  // 省略 geoJSON 具体坐标数据定义（请自行补充区划边界 GeoJSON 数据）
+  const geoJSON = {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": { "name": "东霍各庄村委会" },
+        "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [117.37585764108591,39.739281098238656],
+                [117.37514148618676,39.740151596857245],
+                [117.37274956791616,39.74249346790424],
+                [117.37521589535926,39.74381111076347],
+                [117.3747294696797,39.74449545008688],
+                [117.37549936153128,39.74494074286416],
+                [117.37407113188209,39.74642081089834],
+                [117.37286372044949,39.74756878476975],
+                [117.37161042556264,39.74889683693536],
+                [117.37103327888076,39.749187376135744],
+                [117.37124191082577,39.74951413205172],
+                [117.36906311181775,39.75165414285661],
+                [117.36738572390044,39.753305802883894],
+                [117.36476207208739,39.7557955987722],
+                [117.36261022398986,39.75509834860489],
+                [117.36508592405843,39.75246056764919],
+                [117.36194012366883,39.7506326950635],
+                [117.35930559711358,39.74930136001794],
+                [117.36080677750995,39.747569523384904],
+                [117.36549146829911,39.74287315595673],
+                [117.36485669503594,39.74235297546848],
+                [117.36307423046317,39.74089534510717],
+                [117.36158328930622,39.73966940398471],
+                [117.36198456048346,39.73922593381037],
+                [117.36301745470831,39.74002951779064],
+                [117.36438309152639,39.738447006164094],
+                [117.3638970389178,39.73814763903136],
+                [117.36640985396966,39.73517298520705],
+                [117.36803391613215,39.7360900398389],
+                [117.36988627793764,39.732889440518825],
+                [117.37321410673087,39.7333731142605],
+                [117.37479378758424,39.73398262854194],
+                [117.37654537250916,39.734568100236984],
+                [117.37516192396741,39.73667198984997],
+                [117.37511497366496,39.7367780172243],
+                [117.37411715289508,39.738304705648176],
+                [117.37585764108591,39.739281098238656]
+              ]
+            ]
+          ]
+        }
+      },
+    ]
+  }
+
+  const TDT_TK = "c7223f2b73b583f3f0ed4ca43f17e40c";
+  // 全局 map 变量，解决 message 事件中无法访问的问题
+  let map;
+
+  window.onload = function() {
+    // 1. 天地图卫星底图
+    const tdtVectorLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 2. 天地图注记图层
+    const tdtAnnotationLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 3. 从GeoJSON创建矢量图层（核心样式修改）
+    const vectorLayer = new ol.layer.Vector({
+      source: new ol.source.Vector({
+        features: new ol.format.GeoJSON().readFeatures(geoJSON, {
+          featureProjection: 'EPSG:3857' // 转换为OpenLayers使用的墨卡托投影
+        })
+      }),
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({
+          color: '#6594FF', // 荧光蓝边界
+          width: 2
+        }),
+        fill: new ol.style.Fill({
+          color: 'transparent' // 完全透明填充
+        })
+      })
+    });
+
+    // 4. 初始化地图
+    map = new ol.Map({
+      target: 'map',
+      layers: [tdtVectorLayer, tdtAnnotationLayer, vectorLayer],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([117.200983, 39.084158]), // 天津中心点（可保留作为初始参考）
+        zoom: 3,
+        maxZoom: 18,
+        minZoom: 3
+      })
+    });
+
+// 新增：根据天津所有区域的边界范围自动调整视图，确保居中显示
+    const extent = vectorLayer.getSource().getExtent(); // 获取所有区域的边界范围
+    map.getView().fit(extent, {
+      padding: [50, 50, 50, 50], // 内边距，避免边界紧贴屏幕边缘
+      duration: 500 // 可选：添加平滑过渡动画
+    });
+
+    map.updateSize();
+    // 新增：监听地图视图变化，实时更新缩放层级
+    map.getView().on('change:zoom', function() {
+      const currentZoom = map.getView().getZoom();
+      document.getElementById('zoom-level').textContent = `当前缩放层级：${currentZoom}`;
+    });
+
+    // 5. 添加各区数据标注
+    const tjGeoCoordMap = {
+      "东霍各庄村委会": [117.370937, 39.746036],
+    };
+
+    const tjDatas = [
+      { name: '东霍各庄村委会', value: "" },
+    ];
+
+    // 创建标注点
+    tjDatas.forEach(item => {
+      const coord = tjGeoCoordMap[item.name];
+      if (!coord) return;
+
+      const marker = new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat(coord)),
+        name: item.name,
+        value: item.value
+      });
+
+      marker.setStyle(new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 6,
+          fill: new ol.style.Fill({ color: '#ff5c5c' }),
+          stroke: new ol.style.Stroke({ color: '#fff', width: 2 })
+        }),
+        text: new ol.style.Text({
+          text: `${item.name}\n${item.value}`,
+          offsetX: 15,
+          offsetY: -10,
+          fill: new ol.style.Fill({ color: '#ffef5c' }),
+          stroke: new ol.style.Stroke({ color: '#000', width: 2 }),
+          font: '12px Arial'
+        })
+      }));
+
+      vectorLayer.getSource().addFeature(marker);
+    });
+
+    console.log('地图初始化完成，边界和标注已同步');
+  };
+
+  window.addEventListener('message', function(event) {
+    // 验证消息来源
+    if (event.origin !== 'https://modao.cc' && event.origin !== 'https://www.modao.cc') {
+      return;
+    }
+
+    // 处理缩放指令
+    if (!map) return; // 防止地图未初始化时操作
+    if (event.data.action === 'zoomIn') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom < map.getView().getMaxZoom()) {
+        map.getView().setZoom(currentZoom + 1);
+      }
+    } else if (event.data.action === 'zoomOut') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom > map.getView().getMinZoom()) {
+        map.getView().setZoom(currentZoom - 1);
+      }
+    }
+  }, false);
+
+</script>
+</body>
+</html>
