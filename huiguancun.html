@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>天津卫星地图+区划边界（OpenLayers 原生版）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css">
+  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+    /* 新增：缩放层级显示样式 */
+    #zoom-level {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 8px 15px;
+      border-radius: 4px;
+      font-size: 14px;
+      z-index: 1000;
+      font-family: Arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<!-- 新增：缩放层级显示容器 -->
+<div id="zoom-level">当前缩放层级：10</div>
+
+<script>
+
+  // 省略 geoJSON 具体坐标数据定义（请自行补充区划边界 GeoJSON 数据）
+  const geoJSON = {
+    "type": "Feature",
+    "properties": { "name": "会馆村委会" },
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [117.4327979030468,38.89028084235176],
+            [117.4327157357423,38.8903676600253],
+            [117.43248526865779,38.89060915122221],
+            [117.43231592698176,38.89078877746034],
+            [117.4316305603962,38.89151127905621],
+            [117.43045928338519,38.89274676165418],
+            [117.43030599100618,38.89290743688367],
+            [117.42817906502573,38.895150022183905],
+            [117.42790658014002,38.89543647054838],
+            [117.42765213092876,38.895704957624886],
+            [117.4273996890477,38.895969452484955],
+            [117.42704908082356,38.89633975360175],
+            [117.42695391687681,38.89644056461577],
+            [117.42466212278761,38.89885913326693],
+            [117.42375370090487,38.8998164388859],
+            [117.42227248281289,38.901378750686156],
+            [117.41971654485107,38.89946401163965],
+            [117.42177941227921,38.89692875739788],
+            [117.4246749020013,38.89294856445786],
+            [117.4203986209332,38.88965640377946],
+            [117.4177458741779,38.887613842119976],
+            [117.4221236547755,38.88298616625312],
+            [117.42585060621329,38.8855343493157],
+            [117.42964645082246,38.88812719675306],
+            [117.4327979030468,38.89028084235176]
+          ]
+        ]
+      ]
+    }
+  };
+
+  const TDT_TK = "c7223f2b73b583f3f0ed4ca43f17e40c";
+  // 全局 map 变量，解决 message 事件中无法访问的问题
+  let map;
+
+  window.onload = function() {
+    // 1. 天地图卫星底图
+    const tdtVectorLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 2. 天地图注记图层
+    const tdtAnnotationLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 3. 从GeoJSON创建矢量图层（核心样式修改）
+    const vectorLayer = new ol.layer.Vector({
+      source: new ol.source.Vector({
+        features: new ol.format.GeoJSON().readFeatures(geoJSON, {
+          featureProjection: 'EPSG:3857' // 转换为OpenLayers使用的墨卡托投影
+        })
+      }),
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({
+          color: '#6594FF', // 荧光蓝边界
+          width: 2
+        }),
+        fill: new ol.style.Fill({
+          color: 'transparent' // 完全透明填充
+        })
+      })
+    });
+
+    // 4. 初始化地图
+    map = new ol.Map({
+      target: 'map',
+      layers: [tdtVectorLayer, tdtAnnotationLayer, vectorLayer],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([117.200983, 39.084158]), // 天津中心点（可保留作为初始参考）
+        zoom: 3,
+        maxZoom: 18,
+        minZoom: 3
+      })
+    });
+
+// 新增：根据天津所有区域的边界范围自动调整视图，确保居中显示
+    const extent = vectorLayer.getSource().getExtent(); // 获取所有区域的边界范围
+    map.getView().fit(extent, {
+      padding: [50, 50, 50, 50], // 内边距，避免边界紧贴屏幕边缘
+      duration: 500 // 可选：添加平滑过渡动画
+    });
+
+    map.updateSize();
+    // 新增：监听地图视图变化，实时更新缩放层级
+    map.getView().on('change:zoom', function() {
+      const currentZoom = map.getView().getZoom();
+      document.getElementById('zoom-level').textContent = `当前缩放层级：${currentZoom}`;
+    });
+
+    // 5. 添加各区数据标注
+    const tjGeoCoordMap = {
+      "会馆村委会": [117.420485, 38.892784],
+    };
+
+    const tjDatas = [
+      { name: '会馆村委会', value: "" },
+    ];
+
+    // 创建标注点
+    tjDatas.forEach(item => {
+      const coord = tjGeoCoordMap[item.name];
+      if (!coord) return;
+
+      const marker = new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat(coord)),
+        name: item.name,
+        value: item.value
+      });
+
+      marker.setStyle(new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 6,
+          fill: new ol.style.Fill({ color: '#ff5c5c' }),
+          stroke: new ol.style.Stroke({ color: '#fff', width: 2 })
+        }),
+        text: new ol.style.Text({
+          text: `${item.name}\n${item.value}`,
+          offsetX: 15,
+          offsetY: -10,
+          fill: new ol.style.Fill({ color: '#ffef5c' }),
+          stroke: new ol.style.Stroke({ color: '#000', width: 2 }),
+          font: '12px Arial'
+        })
+      }));
+
+      vectorLayer.getSource().addFeature(marker);
+    });
+
+    console.log('地图初始化完成，边界和标注已同步');
+  };
+
+  window.addEventListener('message', function(event) {
+    // 验证消息来源
+    if (event.origin !== 'https://modao.cc' && event.origin !== 'https://www.modao.cc') {
+      return;
+    }
+
+    // 处理缩放指令
+    if (!map) return; // 防止地图未初始化时操作
+    if (event.data.action === 'zoomIn') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom < map.getView().getMaxZoom()) {
+        map.getView().setZoom(currentZoom + 1);
+      }
+    } else if (event.data.action === 'zoomOut') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom > map.getView().getMinZoom()) {
+        map.getView().setZoom(currentZoom - 1);
+      }
+    }
+  }, false);
+
+</script>
+</body>
+</html>
