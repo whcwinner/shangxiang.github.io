@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>天津卫星地图+区划边界（OpenLayers + 高德路线规划）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css">
+  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+  <script type="text/javascript">
+    window._AMapSecurityConfig = {
+      securityJsCode: '5c8e9f213de8f264cbfda978980e7fe8',
+    };
+  </script>
+  <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=06e814c2c8dd735109f458532a9f3fc3"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    #map {
+      width: 100vw;
+      height: 100vh;
+      position: relative; /* 新增：作为面板的定位容器 */
+    }
+    #zoom-level {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 8px 15px;
+      border-radius: 4px;
+      font-size: 14px;
+      z-index: 1000;
+      font-family: Arial, sans-serif;
+    }
+    /* ✅ 核心修改：路线面板改为绝对定位，跟随路线 */
+    #route-info {
+      position: absolute; /* 改为绝对定位（相对#map） */
+      background: rgba(0,0,0,0.8);
+      color: #fff;
+      padding: 15px;
+      border-radius: 8px;
+      width: 300px;
+      z-index: 1000;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      font-family: 'Microsoft YaHei', sans-serif;
+      pointer-events: none; /* 避免遮挡地图点击 */
+      transform: translate(-50%, -100%); /* 居中+向上偏移 */
+      margin-top: -10px; /* 额外偏移，远离路线 */
+    }
+    #route-info h3 {
+      margin-bottom: 10px;
+      color: #00ffcc;
+      border-bottom: 1px solid #333;
+      padding-bottom: 5px;
+    }
+    #route-info p {
+      margin: 8px 0;
+      line-height: 1.5;
+    }
+    .route-distance {
+      font-size: 18px;
+      font-weight: bold;
+      color: #00ffcc;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="zoom-level">当前缩放层级：10</div>
+<div id="route-info">
+  <h3>路线规划</h3>
+  <p>起点：<span id="route-start">会馆村委会</span></p>
+  <p>终点：<span id="route-end"></span></p>
+  <p class="route-distance">距离：<span id="route-distance">0 km</span></p>
+  <p>预计时间：<span id="route-time">0分钟</span></p>
+</div>
+
+<script>
+  const TDT_TK = "c7223f2b73b583f3f0ed4ca43f17e40c";
+  const AMAP_KEY = "6f6c0cea0317ebb6384cf8002a64c498";
+
+  let map;
+  let markers = {};
+  let routeLayer = null;
+
+  const geoJSON = {
+    "type": "Feature",
+    "properties": { "name": "会馆村委会" },
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [117.42227248281289,38.901378750686156],
+            [117.42184586728614,38.901827994280104],
+            [117.42155545402224,38.90213548286798],
+            [117.41405824745017,38.8963385371112],
+            [117.4127483261437,38.8953251028365],
+            [117.40099559762999,38.88623762861572],
+            [117.40090260117408,38.88616165173982],
+            [117.40070361025394,38.88600070157706],
+            [117.40083263652214,38.885853812894695],
+            [117.40109465966285,38.88581289390662],
+            [117.40128269559322,38.8856530286202],
+            [117.40179381459994,38.88513445077655],
+            [117.4032632215681,38.88380463670923],
+            [117.40438562657775,38.882723644324784],
+            [117.40452264951787,38.88283663139258],
+            [117.41357762658146,38.89031262759686],
+            [117.41390592415203,38.89010001035884],
+            [117.4177458741779,38.887613842119976],
+            [117.4203986209332,38.88965640377946],
+            [117.4246749020013,38.89294856445786],
+            [117.42177941227921,38.89692875739788],
+            [117.41971654485107,38.89946401163965],
+            [117.42227248281289,38.901378750686156]
+          ]
+        ]
+      ]
+    }
+  };
+  const gbJSON = {
+    "type": "Feature",
+    "properties": {"name": "小站稻高标准农田"},
+    "geometry": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [117.4201, 38.8908],
+            [117.4181, 38.8933],
+            [117.4201, 38.8951],
+            [117.4238, 38.8923],
+            [117.4201, 38.8908] // 新增：闭合多边形，避免渲染异常
+          ]
+        ]
+      ]
+    },
+  };
+  // 坐标转换函数（保持不变）
+  const PI = Math.PI;
+  const a = 6378245.0;
+  const ee = 0.00669342162296594323;
+  function bd09ToGcj02(bd_lon, bd_lat) {
+    const x_pi = PI * 3000.0 / 180.0;
+    const x = bd_lon - 0.0065;
+    const y = bd_lat - 0.006;
+    const z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * x_pi);
+    const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * x_pi);
+    return [z * Math.cos(theta), z * Math.sin(theta)];
+  }
+  function outOfChina(lon, lat) {
+    return !(lon > 73.66 && lon < 135.05 && lat > 3.86 && lat < 53.55);
+  }
+  function transformLat(x, y) {
+    let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(y * PI) + 40.0 * Math.sin(y / 3.0 * PI)) * 2.0 / 3.0;
+    ret += (160.0 * Math.sin(y / 12.0 * PI) + 320 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0;
+    return ret;
+  }
+  function transformLon(x, y) {
+    let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+    ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+    ret += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
+    ret += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
+    return ret;
+  }
+  function gcj02ToWgs84(gcj_lon, gcj_lat) {
+    if (outOfChina(gcj_lon, gcj_lat)) return [gcj_lon, gcj_lat];
+    let dlat = transformLat(gcj_lon - 105.0, gcj_lat - 35.0);
+    let dlon = transformLon(gcj_lon - 105.0, gcj_lat - 35.0);
+    const radlat = gcj_lat / 180.0 * PI;
+    let magic = Math.sin(radlat);
+    magic = 1 - ee * magic * magic;
+    const sqrtmagic = Math.sqrt(magic);
+    dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * PI);
+    dlon = (dlon * 180.0) / (a / sqrtmagic * Math.cos(radlat) * PI);
+    const mglat = gcj_lat + dlat;
+    const mglon = gcj_lon + dlon;
+    return [gcj_lon * 2 - mglon, gcj_lat * 2 - mglat];
+  }
+  function bd09ToWgs84(bd_lon, bd_lat) {
+    const [gcj_lon, gcj_lat] = bd09ToGcj02(bd_lon, bd_lat);
+    return gcj02ToWgs84(gcj_lon, gcj_lat);
+  }
+
+  window.onload = function() {
+    // 天地图底图
+    const tdtVectorLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+    const tdtAnnotationLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 区划边界图层
+    const vectorLayer = new ol.layer.Vector({
+      source: new ol.source.Vector({
+        features: new ol.format.GeoJSON().readFeatures(geoJSON, {
+          featureProjection: 'EPSG:3857'
+        })
+      }),
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: '#6594FF', width: 10 }),
+        fill: new ol.style.Fill({ color: 'transparent' })
+      })
+    });
+    const gbLayer = new ol.layer.Vector({
+      source: new ol.source.Vector({
+        features: new ol.format.GeoJSON().readFeatures(gbJSON, {
+          featureProjection: 'EPSG:3857'
+        })
+      }),
+      style: new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: '#ffea65', width: 5 }),
+        fill: new ol.style.Fill({ color: 'rgba(255,234,101,0.71)' })
+      })
+    });
+
+    // 初始化地图
+    map = new ol.Map({
+      target: 'map',
+      layers: [tdtVectorLayer, tdtAnnotationLayer, vectorLayer, gbLayer],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([117.200983, 39.084158]),
+        zoom: 3,
+        maxZoom: 15,
+        minZoom: 3
+      }),
+      clickTolerance: 3
+    });
+
+    // 自动适配边界范围
+    const extent = vectorLayer.getSource().getExtent();
+    map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+    map.updateSize();
+
+    // 监听缩放层级变化
+    map.getView().on('change:zoom', function() {
+      document.getElementById('zoom-level').textContent = `当前缩放层级：${map.getView().getZoom()}`;
+    });
+
+    // 点位配置
+    const locationConfig = {
+      "会馆村委会": { coord: [117.412, 38.891], type: "村委会", emoji: "🏡", color: "#ff5c5c" },
+      "盛塘路收费站": { coord: [117.398, 38.912], type: "三产", emoji: "🛍️", color: "#ffd700" },
+      "安博津南国际仓储物流园": { coord: [117.389, 38.909], type: "二产", emoji: "🏭", color: "#5c5cff" },
+      "小站稻作展览馆": { coord: [117.421, 38.922], type: "三产", emoji: "🏞️", color: "#ffd700" },
+      "小站练兵园": { coord: [117.425, 38.919], type: "三产", emoji: "🏞️", color: "#ffd700" },
+      "小站稻核心种植基地": { coord: [117.409, 38.883], type: "一产", emoji: "🌾", color: "#5cff5c" },
+      "小站稻专卖店": { coord: [117.415, 38.905], type: "三产", emoji: "🛍️", color: "#ffd700" },
+      "梦缘稻米加工中心": { coord: [117.415, 38.879], type: "二产", emoji: "🏭", color: "#5c5cff" },
+      "小站稻高标准农田": { coord:  [117.4240, 38.8935], type: "二产", emoji: "🌾", color: "#5c5cff" },
+    };
+
+    // 创建点位
+    Object.keys(locationConfig).forEach(name => {
+      const config = locationConfig[name];
+
+      const marker = new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat(config.coord)),
+        name: name,
+        gcjCoord: config.coord
+      });
+
+      marker.setStyle([
+        new ol.style.Style({
+          image: new ol.style.Circle({
+            radius: 20,
+            fill: new ol.style.Fill({ color: config.color }),
+            stroke: new ol.style.Stroke({ color: '#fff', width: 2 })
+          }),
+          text: new ol.style.Text({
+            text: config.emoji,
+            font: '25px Arial',
+            offsetY: -2,
+            fill: new ol.style.Fill({ color: '#fff' }),
+            stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.5)', width: 2 })
+          })
+        }),
+        new ol.style.Style({
+          text: new ol.style.Text({
+            text: name,
+            offsetY: -50,
+            offsetX: 0,
+            font: '25px Arial',
+            fill: new ol.style.Fill({ color: '#05ffcd' }),
+            stroke: new ol.style.Stroke({ color: '#000', width: 2 }),
+            backgroundFill: new ol.style.Fill({ color: 'rgba(0,0,0,0.7)' }),
+            backgroundStroke: new ol.style.Stroke({ color: '#000', width: 1 }),
+            backgroundRadius: 4,
+            padding: [2, 5, 2, 5]
+          })
+        })
+      ]);
+
+      vectorLayer.getSource().addFeature(marker);
+      markers[name] = marker;
+    });
+
+    // 地图点击事件
+    map.on('click', function(event) {
+      map.forEachFeatureAtPixel(event.pixel, function(feature) {
+        const name = feature.get('name');
+        if (name && name !== "会馆村委会" && locationConfig[name]) {
+          calculateRoute(name, locationConfig);
+        }
+      });
+    });
+
+    // ========== 核心修复：路线规划函数 ==========
+    function calculateRoute(endPointName, locConfig) {
+      const startConfig = locConfig["会馆村委会"];
+      const startGCJ = startConfig.coord;
+      const endConfig = locConfig[endPointName];
+      const endGCJ = endConfig.coord;
+
+      // 清除旧路线
+      if (routeLayer) {
+        map.removeLayer(routeLayer);
+        routeLayer = null;
+      }
+
+      // 显示信息面板（先显示，后续调整位置）
+      document.getElementById('route-end').textContent = endPointName;
+      const routeInfo = document.getElementById('route-info');
+      routeInfo.style.display = 'block';
+
+      // 调用高德API
+      const url = `https://restapi.amap.com/v3/direction/driving?` +
+        `origin=${startGCJ[0]},${startGCJ[1]}&` +
+        `destination=${endGCJ[0]},${endGCJ[1]}&` +
+        `key=${AMAP_KEY}&` +
+        `output=json&` +
+        `extensions=all`;
+
+      console.log('路线规划请求URL:', url);
+
+      fetch(url)
+        .then(response => {
+          if (!response.ok) throw new Error(`HTTP错误：${response.status}`);
+          return response.json();
+        })
+        .then(data => {
+          console.log('高德API返回数据:', data);
+
+          if (data && data.status === '1' && data.route && data.route.paths && data.route.paths.length > 0) {
+            const path = data.route.paths[0];
+            const distance = Number(path.distance) / 1000;
+            const duration = path.duration ? Number(path.duration) : distance * 120;
+
+            // 更新路线信息
+            document.getElementById('route-distance').textContent = `${distance.toFixed(1)} km`;
+            document.getElementById('route-time').textContent = `${Math.round(duration/60)}分钟`;
+
+            // 解析路线坐标
+            let allCoordinates = [];
+            if (path.polyline) {
+              const coords = AMap.Polyline.decode(path.polyline);
+              coords.forEach(coord => {
+                allCoordinates.push(ol.proj.fromLonLat([coord.lng, coord.lat]));
+              });
+            } else {
+              allCoordinates = [
+                ol.proj.fromLonLat([startGCJ[0], startGCJ[1]]),
+                ol.proj.fromLonLat([endGCJ[0], endGCJ[1]])
+              ];
+            }
+
+            // 创建路线图层
+            routeLayer = new ol.layer.Vector({
+              source: new ol.source.Vector({
+                features: [new ol.Feature({
+                  geometry: new ol.geom.LineString(allCoordinates)
+                })]
+              }),
+              style: new ol.style.Style({
+                stroke: new ol.style.Stroke({
+                  color: '#ff4444',
+                  width: 5,
+                  lineDash: [10, 5]
+                })
+              })
+            });
+            map.addLayer(routeLayer);
+
+            // 聚焦到路线
+            if (allCoordinates.length > 0) {
+              const routeExtent = new ol.extent.boundingExtent(allCoordinates);
+              map.getView().fit(routeExtent, { padding: [50, 50, 50, 50], duration: 1000 });
+
+              // ✅ 核心新增：计算路线中点，设置面板位置
+              if (allCoordinates.length >= 2) {
+                // 1. 取路线中点的地理坐标（EPSG:3857）
+                const midIndex = Math.floor(allCoordinates.length / 2);
+                const midCoord = allCoordinates[midIndex];
+
+                // 2. 转换为屏幕坐标（相对地图容器）
+                const pixel = map.getPixelFromCoordinate(midCoord);
+
+                // 3. 设置面板位置（适配边界，避免超出地图）
+                const mapEl = document.getElementById('map');
+                const mapRect = mapEl.getBoundingClientRect();
+                const panelWidth = routeInfo.offsetWidth;
+                const panelHeight = routeInfo.offsetHeight;
+
+                // 计算最终位置（确保面板在地图内）
+                let left = pixel[0];
+                let top = pixel[1];
+
+                // 左边界限制
+                if (left < panelWidth/2) left = panelWidth/2;
+                // 右边界限制
+                if (left > mapRect.width - panelWidth/2) left = mapRect.width - panelWidth/2;
+                // 上边界限制
+                if (top < panelHeight + 10) top = panelHeight + 10;
+                // 下边界限制
+                if (top > mapRect.height - 20) top = mapRect.height - 20;
+
+                // 应用位置
+                routeInfo.style.left = `${left}px`;
+                routeInfo.style.top = `${top}px`;
+              }
+            }
+          } else {
+            alert(`无法获取路线信息：${data?.info || '未知错误'}`);
+          }
+        })
+        .catch(error => {
+          console.error('路线规划请求失败:', error);
+          alert(`路线规划请求失败：${error.message}`);
+        });
+    }
+
+    console.log('地图初始化完成，所有点位已添加');
+  };
+
+  // 缩放控制
+  window.addEventListener('message', function(event) {
+    if (event.origin !== 'https://modao.cc' && event.origin !== 'https://www.modao.cc') return;
+    if (!map) return;
+    if (event.data.action === 'zoomIn') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom < map.getView().getMaxZoom()) map.getView().setZoom(currentZoom + 1);
+    } else if (event.data.action === 'zoomOut') {
+      const currentZoom = map.getView().getZoom();
+      if (currentZoom > map.getView().getMinZoom()) map.getView().setZoom(currentZoom - 1);
+    }
+  }, false);
+</script>
+</body>
+</html>
