@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>天津小站稻高标准农田围栏（OpenLayers）</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css">
+  <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+    #zoom-level {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 8px 15px;
+      border-radius: 4px;
+      font-size: 14px;
+      z-index: 1000;
+      font-family: Arial, sans-serif;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="zoom-level">当前缩放层级：15</div>
+
+<script>
+  // 天地图密钥
+  const TDT_TK = "c7223f2b73b583f3f0ed4ca43f17e40c";
+  let map;
+
+  // 地块数据
+  const gbJSON = {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {"name": "高标地块一", "type": "polygon"},
+        "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [117.421, 38.8908],
+                [117.4175, 38.8933],
+                [117.4195, 38.8951],
+                [117.4233, 38.8926],
+                [117.421, 38.8908] // 闭合多边形
+              ]
+            ]
+          ]
+        },
+      },
+      {
+        "type": "Feature",
+        "properties": {"name": "高标地块二", "type": "polygon"},
+        "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [117.417, 38.8935],//左下
+                [117.4156, 38.8946],//左上
+                [117.4185, 38.89611],//右上
+                [117.420, 38.8955],//右下
+                [117.417, 38.8935] // 闭合多边形
+              ]
+            ]
+          ]
+        },
+      },
+      {
+        "type": "Feature",
+        "properties": {"name": "搜索地块", "type": "polygon"},
+        "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [117.4196, 38.8953],//左下
+                [117.4181, 38.896],//左上
+                [117.421, 38.898],//右上
+                [117.4217, 38.8969],//右下
+                [117.4196, 38.8953] // 闭合多边形
+              ]
+            ]
+          ]
+        },
+      },
+      {
+        "type": "Feature",
+        "properties": {"name": "重叠地块", "type": "polygon"}, // 改回polygon类型
+        "geometry": {
+          "type": "MultiPolygon",
+          "coordinates": [
+            [
+              [
+                [117.4196, 38.8953],//左下
+                [117.4181, 38.896],//左上
+                [117.4185, 38.89611],//右上
+                [117.420, 38.8955],//右下
+                [117.4196, 38.8953] // 闭合多边形
+              ]
+            ]
+          ]
+        },
+      }
+    ]
+  };
+
+  // 计算多边形中心点（用于点位标注）
+  function getPolygonCenter(coordinates) {
+    let lonSum = 0, latSum = 0, count = 0;
+    // 遍历MultiPolygon坐标
+    coordinates.forEach(polygon => {
+      polygon.forEach(ring => {
+        ring.forEach(coord => {
+          lonSum += coord[0];
+          latSum += coord[1];
+          count++;
+        });
+      });
+    });
+    return [lonSum / count, latSum / count];
+  }
+
+  window.onload = function() {
+    // 1. 加载天地图卫星底图
+    const tdtVectorLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 2. 加载天地图注记图层（显示地名）
+    const tdtAnnotationLayer = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url: `http://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+        crossOrigin: 'anonymous'
+      })
+    });
+
+    // 3. 创建矢量数据源
+    const vectorSource = new ol.source.Vector();
+
+    // 4. 处理每个地块特征
+    gbJSON.features.forEach(featureJson => {
+      const feature = new ol.format.GeoJSON().readFeature(featureJson, {
+        featureProjection: 'EPSG:3857'
+      });
+      const name = featureJson.properties.name;
+      const type = featureJson.properties.type;
+
+      // 样式配置
+      let featureStyle = [];
+
+      // 多边形地块（所有地块统一为多边形处理）
+      if (type === 'polygon') {
+        // 区分重叠地块和其他地块的样式
+        if (name === "重叠地块") {
+          // 重叠地块：红色围栏+红色填充
+          featureStyle.push(new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: '#ff0000', width: 5 }), // 红色边框
+            fill: new ol.style.Fill({ color: 'rgba(255, 0, 0, 0.5)' }) // 半透明红色填充
+          }));
+        } else {
+          // 其他地块：黄色围栏+黄色填充
+          featureStyle.push(new ol.style.Style({
+            stroke: new ol.style.Stroke({ color: '#ffea65', width: 5 }), // 黄色边框
+            fill: new ol.style.Fill({ color: 'rgba(255,234,101,0.3)' }) // 半透明黄色填充
+          }));
+        }
+
+        // 计算中心点用于添加文字标注
+        const center = getPolygonCenter(featureJson.geometry.coordinates);
+        const centerPoint = new ol.Feature({
+          geometry: new ol.geom.Point(ol.proj.fromLonLat(center))
+        });
+
+        // 统一的文字标注样式
+        centerPoint.setStyle(new ol.style.Style({
+          text: new ol.style.Text({
+            text: name,
+            font: '20px Microsoft YaHei',
+            fill: new ol.style.Fill({ color: '#ffffff' }),
+            stroke: new ol.style.Stroke({ color: '#000000', width: 2 }),
+            backgroundFill: new ol.style.Fill({ color: 'rgba(0,0,0,0.7)' }),
+            backgroundRadius: 4,
+            padding: [3, 8, 3, 8]
+          })
+        }));
+        vectorSource.addFeature(centerPoint);
+      }
+
+      feature.setStyle(featureStyle);
+      vectorSource.addFeature(feature);
+    });
+
+    // 5. 创建矢量图层
+    const gbLayer = new ol.layer.Vector({
+      source: vectorSource
+    });
+
+    // 6. 初始化地图
+    map = new ol.Map({
+      target: 'map',
+      layers: [tdtVectorLayer, tdtAnnotationLayer, gbLayer],
+      view: new ol.View({
+        center: ol.proj.fromLonLat([117.4201, 38.8908]),
+        zoom: 15,
+        maxZoom: 19,
+        minZoom: 10
+      })
+    });
+
+    // 自动适配所有地块范围
+    const extent = vectorSource.getExtent();
+    map.getView().fit(extent, { padding: [80, 80, 80, 80], duration: 500 });
+
+    // 监听缩放层级变化
+    map.getView().on('change:zoom', function() {
+      document.getElementById('zoom-level').textContent = `当前缩放层级：${map.getView().getZoom()}`;
+    });
+  };
+</script>
+</body>
+</html>
