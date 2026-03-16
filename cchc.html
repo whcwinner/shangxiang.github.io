@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>天津卫星地图 + 区划边界（OpenLayers + 高德路线规划）</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@7.3.0/ol.css">
+    <script src="https://cdn.jsdelivr.net/npm/ol@7.3.0/dist/ol.js"></script>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '5c8e9f213de8f264cbfda978980e7fe8',
+        };
+    </script>
+    <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=06e814c2c8dd735109f458532a9f3fc3"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        #map {
+            width: 100vw;
+            height: 100vh;
+            position: relative;
+        }
+        #zoom-level {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 8px 15px;
+            border-radius: 4px;
+            font-size: 14px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+        }
+        /* ✅ 产业筛选按钮组 */
+        .filter-btn-group {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+            background: rgba(0,0,0,0.6);
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .filter-btn {
+            padding: 8px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Microsoft YaHei', sans-serif;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 500;
+            color: #fff;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .filter-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .filter-btn.active {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        /* 各类型按钮颜色 */
+        .filter-btn[data-type="all"].active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+        .filter-btn[data-type="一产"].active {
+            background: linear-gradient(135deg, #5cff5c 0%, #2ecc71 100%);
+            border-color: #5cff5c;
+        }
+        .filter-btn[data-type="二产"].active {
+            background: linear-gradient(135deg, #5c5cff 0%, #3498db 100%);
+            border-color: #5c5cff;
+        }
+        .filter-btn[data-type="三产"].active {
+            background: linear-gradient(135deg, #ffd700 0%, #f39c12 100%);
+            border-color: #ffd700;
+        }
+        .filter-btn[data-type="闲置农房"].active {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+            border-color: #ff6b6b;
+        }
+        /* 路线规划面板 - Overlay 容器样式 */
+        .route-info-overlay {
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            width: 300px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            font-family: 'Microsoft YaHei', sans-serif;
+            pointer-events: auto;
+            position: relative;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-20px);
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .route-info-overlay.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        .route-info-overlay h3 {
+            margin-bottom: 10px;
+            color: #00ffcc;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        .route-info-overlay p {
+            margin: 8px 0;
+            line-height: 1.5;
+        }
+        .route-info-overlay .route-distance {
+            font-size: 18px;
+            font-weight: bold;
+            color: #00ffcc;
+        }
+        .route-info-overlay::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            bottom: -10px;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 10px solid rgba(0,0,0,0.85);
+        }
+        /* 点位信息面板 - Overlay 容器样式 */
+        .point-info-overlay {
+            background: rgba(0,0,0,0.85);
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            font-family: 'Microsoft YaHei', sans-serif;
+            pointer-events: auto;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateX(20px);
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .point-info-overlay.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(0);
+        }
+        .point-info-overlay h3 {
+            margin-bottom: 10px;
+            color: #40e0d0;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            position: relative;
+            padding-right: 25px;
+        }
+        .point-info-overlay p {
+            margin: 6px 0;
+            line-height: 1.6;
+        }
+        .point-info-overlay .info-label {
+            color: #ffd700;
+            font-weight: bold;
+            display: inline-block;
+            width: 80px;
+        }
+        .point-info-overlay .info-value {
+            color: #ffffff;
+        }
+        /* 关闭按钮样式 */
+        .close-btn {
+            position: absolute;
+            top: 5px;
+            right: 8px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #ff4444;
+            color: #fff;
+            text-align: center;
+            line-height: 18px;
+            cursor: pointer;
+            font-size: 14px;
+            border: none;
+            padding: 0;
+            transition: background 0.2s ease;
+        }
+        .close-btn:hover {
+            background: #ff6666;
+        }
+        /* 距离测算按钮样式 */
+        #distance-calc-btn {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #008fff;
+            color: #fff;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-family: 'Microsoft YaHei', sans-serif;
+            cursor: pointer;
+            z-index: 1000;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+        #distance-calc-btn.active {
+            background: #ff4444;
+            color: #fff;
+        }
+        #distance-calc-btn:hover {
+            opacity: 0.9;
+            transform: translateX(-50%) scale(1.05);
+        }
+        .ol-overlay-container {
+            will-change: transform;
+        }
+    </style>
+</head>
+<body>
+<div id="map"></div>
+<div id="zoom-level">当前缩放层级：10</div>
+
+<!-- ✅ 产业筛选按钮组 -->
+<div class="filter-btn-group">
+    <button class="filter-btn active" data-type="all">📊 全部</button>
+    <button class="filter-btn" data-type="一产">🌾 一产</button>
+    <button class="filter-btn" data-type="二产">🏭 二产</button>
+    <button class="filter-btn" data-type="三产">🏞️ 三产</button>
+    <button class="filter-btn" data-type="闲置农房">🏠 闲置农房</button>
+</div>
+
+<!-- 距离测算按钮 -->
+<button id="distance-calc-btn">距离测算</button>
+
+<script>
+    const TDT_TK = "c7223f2b73b583f3f0ed4ca43f17e40c";
+    const AMAP_KEY = "6f6c0cea0317ebb6384cf8002a64c498";
+
+    let map;
+    let markers = {};
+    let routeLayer = null;
+    let distanceCalcActive = false;
+    let activePoint = { name: '', config: null };
+    let pointInfoOverlay = null;
+    let pointInfoElement = null;
+    let routeInfoOverlay = null;
+    let routeInfoElement = null;
+    let currentFilterType = 'all';
+
+    // ✅ 生成扎点 SVG 图标函数
+    function createPinSVG(color) {
+        const svg = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48">
+                <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"
+                      fill="${encodeURIComponent(color)}" stroke="#ffffff" stroke-width="1.5"/>
+            </svg>
+        `;
+        return 'data:image/svg+xml;charset=utf-8,' + svg.replace(/\s+/g, ' ');
+    }
+
+    const geoJSON = {
+        "type": "Feature",
+        "properties": { "name": "操场河村委会" },
+        "geometry": {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [
+                    [
+                        [117.4327979030468,38.89028084235176],
+                        [117.4327157357423,38.8903676600253],
+                        [117.43248526865779,38.89060915122221],
+                        [117.43231592698176,38.89078877746034],
+                        [117.4316305603962,38.89151127905621],
+                        [117.43045928338519,38.89274676165418],
+                        [117.43030599100618,38.89290743688367],
+                        [117.42817906502573,38.895150022183905],
+                        [117.42790658014002,38.89543647054838],
+                        [117.42765213092876,38.895704957624886],
+                        [117.4273996890477,38.895969452484955],
+                        [117.42704908082356,38.89633975360175],
+                        [117.42695391687681,38.89644056461577],
+                        [117.42466212278761,38.89885913326693],
+                        [117.42375370090487,38.8998164388859],
+                        [117.42227248281289,38.901378750686156],
+                        [117.41971654485107,38.89946401163965],
+                        [117.42177941227921,38.89692875739788],
+                        [117.4246749020013,38.89294856445786],
+                        [117.4203986209332,38.88965640377946],
+                        [117.4177458741779,38.887613842119976],
+                        [117.4221236547755,38.88298616625312],
+                        [117.42585060621329,38.8855343493157],
+                        [117.42964645082246,38.88812719675306],
+                        [117.4327979030468,38.89028084235176]
+                    ]
+                ]
+            ]
+        }
+    };
+    const gbJSON = {
+        "type": "Feature",
+        "properties": {"name": "小站稻高标准农田"},
+        "geometry": {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [
+                    [
+                        [117.4247, 38.8868],
+                        [117.4213, 38.8898],
+                        [117.4255, 38.8922],
+                        [117.4288, 38.889],
+                        [117.4247, 38.8868]
+                    ]
+                ]
+            ]
+        },
+    };
+    const PI = Math.PI;
+    const a = 6378245.0;
+    const ee = 0.00669342162296594323;
+    function bd09ToGcj02(bd_lon, bd_lat) {
+        const x_pi = PI * 3000.0 / 180.0;
+        const x = bd_lon - 0.0065;
+        const y = bd_lat - 0.006;
+        const z = Math.sqrt(x * x + y * y) - 0.00002 * Math.sin(y * x_pi);
+        const theta = Math.atan2(y, x) - 0.000003 * Math.cos(x * x_pi);
+        return [z * Math.cos(theta), z * Math.sin(theta)];
+    }
+    function outOfChina(lon, lat) {
+        return !(lon > 73.66 && lon < 135.05 && lat > 3.86 && lat < 53.55);
+    }
+    function transformLat(x, y) {
+        let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(y * PI) + 40.0 * Math.sin(y / 3.0 * PI)) * 2.0 / 3.0;
+        ret += (160.0 * Math.sin(y / 12.0 * PI) + 320 * Math.sin(y * PI / 30.0)) * 2.0 / 3.0;
+        return ret;
+    }
+    function transformLon(x, y) {
+        let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        ret += (20.0 * Math.sin(6.0 * x * PI) + 20.0 * Math.sin(2.0 * x * PI)) * 2.0 / 3.0;
+        ret += (20.0 * Math.sin(x * PI) + 40.0 * Math.sin(x / 3.0 * PI)) * 2.0 / 3.0;
+        ret += (150.0 * Math.sin(x / 12.0 * PI) + 300.0 * Math.sin(x / 30.0 * PI)) * 2.0 / 3.0;
+        return ret;
+    }
+    function gcj02ToWgs84(gcj_lon, gcj_lat) {
+        if (outOfChina(gcj_lon, gcj_lat)) return [gcj_lon, gcj_lat];
+        let dlat = transformLat(gcj_lon - 105.0, gcj_lat - 35.0);
+        let dlon = transformLon(gcj_lon - 105.0, gcj_lat - 35.0);
+        const radlat = gcj_lat / 180.0 * PI;
+        let magic = Math.sin(radlat);
+        magic = 1 - ee * magic * magic;
+        const sqrtmagic = Math.sqrt(magic);
+        dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * PI);
+        dlon = (dlon * 180.0) / (a / sqrtmagic * Math.cos(radlat) * PI);
+        const mglat = gcj_lat + dlat;
+        const mglon = gcj_lon + dlon;
+        return [gcj_lon * 2 - mglon, gcj_lat * 2 - mglat];
+    }
+    function bd09ToWgs84(bd_lon, bd_lat) {
+        const [gcj_lon, gcj_lat] = bd09ToGcj02(bd_lon, bd_lat);
+        return gcj02ToWgs84(gcj_lon, gcj_lat);
+    }
+
+    window.onload = function() {
+        const tdtVectorLayer = new ol.layer.Tile({
+            source: new ol.source.XYZ({
+                url: `http://t0.tianditu.gov.cn/img_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+                crossOrigin: 'anonymous'
+            })
+        });
+        const tdtAnnotationLayer = new ol.layer.Tile({
+            source: new ol.source.XYZ({
+                url: `http://t0.tianditu.gov.cn/cia_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=cia&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&tk=${TDT_TK}`,
+                crossOrigin: 'anonymous'
+            })
+        });
+
+        const vectorLayer = new ol.layer.Vector({
+            source: new ol.source.Vector({
+                features: new ol.format.GeoJSON().readFeatures(geoJSON, {
+                    featureProjection: 'EPSG:3857'
+                })
+            }),
+            style: new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: '#6594FF', width: 10 }),
+                fill: new ol.style.Fill({ color: 'transparent' })
+            })
+        });
+        const gbLayer = new ol.layer.Vector({
+            source: new ol.source.Vector({
+                features: new ol.format.GeoJSON().readFeatures(gbJSON, {
+                    featureProjection: 'EPSG:3857'
+                })
+            }),
+            style: new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: '#ffea65', width: 5 }),
+                fill: new ol.style.Fill({ color: 'rgba(255,234,101,0.71)' })
+            })
+        });
+
+        map = new ol.Map({
+            target: 'map',
+            layers: [tdtVectorLayer, tdtAnnotationLayer, vectorLayer, gbLayer],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([117.200983, 39.084158]),
+                zoom: 10,
+                maxZoom: 15,
+                minZoom: 3
+            }),
+            clickTolerance: 3
+        });
+
+        const extent = vectorLayer.getSource().getExtent();
+        map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 500 });
+        map.updateSize();
+
+        map.getView().on('change:zoom', function() {
+            document.getElementById('zoom-level').textContent = `当前缩放层级：${map.getView().getZoom().toFixed(1)}`;
+        });
+
+        // ✅ 创建点位信息 Overlay
+        function createPointInfoOverlay() {
+            pointInfoElement = document.createElement('div');
+            pointInfoElement.className = 'point-info-overlay';
+            pointInfoElement.innerHTML = `
+                <button class="close-btn">×</button>
+                <h3 id="point-name">点位名称</h3>
+                <div id="point-info-content"></div>
+            `;
+
+            pointInfoElement.querySelector('.close-btn').addEventListener('click', function(e) {
+                e.stopPropagation();
+                hidePointInfo();
+            });
+
+            pointInfoOverlay = new ol.Overlay({
+                element: pointInfoElement,
+                offset: [120, -50],
+                positioning: 'center-left',
+                stopEvent: false,
+                className: 'point-info-overlay-container'
+            });
+
+            map.addOverlay(pointInfoOverlay);
+        }
+
+        function createRouteInfoOverlay() {
+            routeInfoElement = document.createElement('div');
+            routeInfoElement.className = 'route-info-overlay';
+            routeInfoElement.innerHTML = `
+                <button class="close-btn" style="top: 3px; right: 6px; width: 18px; height: 18px; font-size: 12px; line-height: 16px;">×</button>
+                <h3>📍 路线规划</h3>
+                <p>起点：<span id="route-start">操场河村委会</span></p>
+                <p>终点：<span id="route-end"></span></p>
+                <p class="route-distance">📏 距离：<span id="route-distance">0 km</span></p>
+                <p>⏱️ 预计时间：<span id="route-time">0 分钟</span></p>
+            `;
+
+            routeInfoElement.querySelector('.close-btn').addEventListener('click', function(e) {
+                e.stopPropagation();
+                hideRouteInfo();
+            });
+
+            routeInfoOverlay = new ol.Overlay({
+                element: routeInfoElement,
+                offset: [0, -80],
+                positioning: 'top-center',
+                stopEvent: false,
+                className: 'route-info-overlay-container'
+            });
+
+            map.addOverlay(routeInfoOverlay);
+        }
+
+        const locationConfig = {
+            "操场河村委会": {
+                coord: [117.426, 38.893],
+                type: "村委会",
+                emoji: "🏡",
+                color: "#ff5c5c",
+                area: "2075亩",
+                ploughArea: "1017亩",
+                permanentResidentPopulation: "1234人",
+                members: "1105人",
+                partyMember: "34人",
+                desc: "小站镇操场河村村民委员会，负责村内日常行政管理工作"
+            },
+            "盛塘路收费站": {
+                coord: [117.398, 38.912],
+                type: "三产",
+                emoji: "🛍️",
+                color: "#ffd700",
+                area: "2000㎡",
+                output: "无（服务类）",
+                desc: "津晋高速盛塘路收费站，主要负责高速通行费收取，年通行量约 50 万辆次"
+            },
+            "安博津南国际仓储物流园": {
+                coord: [117.389, 38.909],
+                type: "二产",
+                emoji: "🏭",
+                color: "#5c5cff",
+                area: "150000㎡",
+                output: "无（仓储物流）",
+                desc: "现代化仓储物流园区，主要服务于津南区及周边区域的货物存储与运输"
+            },
+            "小站稻作展览馆": {
+                coord: [117.421, 38.922],
+                type: "三产",
+                emoji: "🏞️",
+                color: "#ffd700",
+                area: "8000㎡",
+                output: "无（文旅类）",
+                desc: "展示小站稻的历史文化、种植技术和发展历程，年接待游客约 10 万人次"
+            },
+            "小站练兵园": {
+                coord: [117.425, 38.919],
+                type: "三产",
+                emoji: "🏞️",
+                color: "#ffd700",
+                area: "30000㎡",
+                output: "无（文旅类）",
+                desc: "以近代军事练兵为主题的文化旅游景区，是小站镇重要的文旅地标"
+            },
+            "小站稻核心种植基地": {
+                coord: [117.409, 38.883],
+                type: "一产",
+                emoji: "🌾",
+                color: "#5cff5c",
+                area: "2000 亩",
+                output: "1200 吨",
+                desc: "小站稻核心种植区域，采用标准化种植技术，是小站稻优质产区"
+            },
+            "小站稻专卖店": {
+                coord: [117.415, 38.905],
+                type: "三产",
+                emoji: "🛍️",
+                color: "#ffd700",
+                area: "120㎡",
+                output: "无（销售类）",
+                desc: "小站稻特色产品专卖店，主要销售小站稻大米、深加工产品等"
+            },
+            "梦缘稻米加工中心": {
+                coord: [117.415, 38.879],
+                type: "二产",
+                emoji: "🏭",
+                color: "#5c5cff",
+                area: "10000㎡",
+                output: "5000 吨/年",
+                desc: "专业的稻米加工企业，提供稻谷清理、碾米、包装等全流程加工服务"
+            },
+            "小站稻高标准农田": {
+                coord: [117.4288, 38.889],
+                type: "一产",
+                emoji: "🌾",
+                color: "#5cff5c",
+                area: "1500 亩",
+                output: "900 吨",
+                desc: "高标准农田建设示范区，采用节水灌溉、绿色防控等现代化种植技术"
+            },
+            "闲置农房 1": {
+                coord: [117.4285, 38.889],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "乔云海",
+                area: "90 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 2": {
+                coord: [117.4288, 38.889],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "乔金江",
+                area: "90 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 3": {
+                coord: [117.4255, 38.8922],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "李金亮",
+                area: "80 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 4": {
+                coord: [117.425, 38.8919],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "王河新",
+                area: "80 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 5": {
+                coord: [117.423, 38.8917],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "唐洪海",
+                area: "80 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 6": {
+                coord: [117.423, 38.8915],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "张永新",
+                area: "80 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+            "闲置农房 7": {
+                coord: [117.423, 38.8911],
+                type: "闲置农房",
+                emoji: "🏠",
+                color: "#ff6b6b",
+                headOfHousehold: "秦会义",
+                area: "80 平方米",
+                flowOrNot: "是",
+                haveAHomeOrNot: "是",
+                desc: "自然资源丰富"
+            },
+
+        };
+
+        // ✅ 创建点位并存储类型信息
+        Object.keys(locationConfig).forEach(name => {
+            const config = locationConfig[name];
+
+            const marker = new ol.Feature({
+                geometry: new ol.geom.Point(ol.proj.fromLonLat(config.coord)),
+                name: name,
+                gcjCoord: config.coord,
+                type: config.type
+            });
+
+            // ✅ 闲置农房默认隐藏 (style 设为 null)，其他点位显示
+            if (config.type === '闲置农房') {
+                marker.setStyle(null);
+            } else {
+                marker.setStyle(createMarkerStyle(name, config));
+            }
+
+            vectorLayer.getSource().addFeature(marker);
+            markers[name] = marker;
+        });
+
+        createPointInfoOverlay();
+        createRouteInfoOverlay();
+
+        // ✅ 产业筛选按钮事件
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                currentFilterType = this.getAttribute('data-type');
+                applyFilter(currentFilterType);
+                hidePointInfo();
+                hideRouteInfo();
+            });
+        });
+
+        // ✅ 应用筛选函数
+        function applyFilter(filterType) {
+            vectorLayer.getSource().getFeatures().forEach(feature => {
+                const geometry = feature.getGeometry();
+                if (!(geometry instanceof ol.geom.Point)) return;
+
+                const name = feature.get('name');
+                const type = feature.get('type');
+
+                if (!name || !locationConfig[name]) return;
+
+                let shouldShow = false;
+                if (filterType === 'all') {
+                    shouldShow = true;
+                } else if (type === filterType) {
+                    shouldShow = true;
+                } else if (filterType === '一产' && type === '村委会') {
+                    shouldShow = true;
+                }
+
+                // ✅ 闲置农房特殊处理：只有选择"闲置农房"或"全部"时才显示
+                if (type === '闲置农房') {
+                    if (filterType === '闲置农房' || filterType === 'all') {
+                        shouldShow = true;
+                    } else {
+                        shouldShow = false;
+                    }
+                }
+
+                feature.setStyle(shouldShow ? createMarkerStyle(name, locationConfig[name]) : null);
+            });
+        }
+
+        // ✅ 创建样式函数 - 闲置农房使用扎点形状
+        // ✅ 创建样式函数 - 闲置农房只显示大头针图标
+        function createMarkerStyle(name, config) {
+            // ✅ 闲置农房使用大头针 emoji + 不显示名称
+            if (config.type === '闲置农房') {
+                return new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 10,
+                        fill: new ol.style.Fill({ color: config.color }),
+                        stroke: new ol.style.Stroke({ color: '#fff', width: 2 })
+                    }),
+                    text: new ol.style.Text({
+                        text: config.emoji,  // 显示 🏠 emoji
+                        font: '10px Arial',
+                        offsetY: -2,
+                        fill: new ol.style.Fill({ color: '#fff' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.5)', width: 2 })
+                    }),
+                    zIndex: 10
+                });
+            }
+
+            // ✅ 普通点位使用圆形 + emoji + 名称标签
+            return [
+                new ol.style.Style({
+                    image: new ol.style.Circle({
+                        radius: 20,
+                        fill: new ol.style.Fill({ color: config.color }),
+                        stroke: new ol.style.Stroke({ color: '#fff', width: 2 })
+                    }),
+                    text: new ol.style.Text({
+                        text: config.emoji,
+                        font: '25px Arial',
+                        offsetY: -2,
+                        fill: new ol.style.Fill({ color: '#fff' }),
+                        stroke: new ol.style.Stroke({ color: 'rgba(0,0,0,0.5)', width: 2 })
+                    })
+                }),
+                new ol.style.Style({
+                    text: new ol.style.Text({
+                        text: name,
+                        offsetY: -50,
+                        offsetX: 0,
+                        font: '14px Microsoft YaHei',
+                        fill: new ol.style.Fill({ color: '#05ffcd' }),
+                        stroke: new ol.style.Stroke({ color: '#000', width: 2 }),
+                        backgroundFill: new ol.style.Fill({ color: 'rgba(0,0,0,0.7)' }),
+                        backgroundStroke: new ol.style.Stroke({ color: '#000', width: 1 }),
+                        backgroundRadius: 4,
+                        padding: [4, 8, 4, 8]
+                    })
+                })
+            ];
+        }
+
+        const calcBtn = document.getElementById('distance-calc-btn');
+        calcBtn.addEventListener('click', function() {
+            distanceCalcActive = !distanceCalcActive;
+            if (distanceCalcActive) {
+                calcBtn.classList.add('active');
+                calcBtn.textContent = '关闭距离测算';
+                hidePointInfo();
+                hideRouteInfo();
+                if (routeLayer) {
+                    map.removeLayer(routeLayer);
+                    routeLayer = null;
+                }
+            } else {
+                calcBtn.classList.remove('active');
+                calcBtn.textContent = '距离测算';
+                hideRouteInfo();
+                if (routeLayer) {
+                    map.removeLayer(routeLayer);
+                    routeLayer = null;
+                }
+            }
+        });
+
+        map.on('click', function(event) {
+            if (pointInfoElement) {
+                const pointOverlayRect = pointInfoElement.getBoundingClientRect();
+                const clickInPointOverlay = event.pixel &&
+                    event.pixel[0] >= pointOverlayRect.left &&
+                    event.pixel[0] <= pointOverlayRect.right &&
+                    event.pixel[1] >= pointOverlayRect.top &&
+                    event.pixel[1] <= pointOverlayRect.bottom;
+                if (clickInPointOverlay) return;
+            }
+
+            if (routeInfoElement) {
+                const routeOverlayRect = routeInfoElement.getBoundingClientRect();
+                const clickInRouteOverlay = event.pixel &&
+                    event.pixel[0] >= routeOverlayRect.left &&
+                    event.pixel[0] <= routeOverlayRect.right &&
+                    event.pixel[1] >= routeOverlayRect.top &&
+                    event.pixel[1] <= routeOverlayRect.bottom;
+                if (clickInRouteOverlay) return;
+            }
+
+            map.forEachFeatureAtPixel(event.pixel, function(feature) {
+                const geometry = feature.getGeometry();
+                if (!(geometry instanceof ol.geom.Point)) {
+                    return;
+                }
+
+                if (feature.getStyle() === null) {
+                    return;
+                }
+
+                const name = feature.get('name');
+                if (!name || !locationConfig[name]) return;
+
+                if (distanceCalcActive) {
+                    if (name !== "操场河村委会") {
+                        calculateRoute(name, locationConfig);
+                    }
+                } else {
+                    showPointInfo(name, locationConfig[name]);
+                }
+            }, {
+                layerFilter: function(layer) {
+                    return layer === vectorLayer;
+                }
+            });
+        });
+
+        // ✅ 根据点位类型动态显示不同字段
+        function showPointInfo(pointName, pointData) {
+            activePoint.name = pointName;
+            activePoint.config = pointData;
+            hideRouteInfo();
+
+            document.getElementById('point-name').textContent = pointName;
+
+            const contentDiv = document.getElementById('point-info-content');
+
+            if (pointData.type === '闲置农房') {
+                contentDiv.innerHTML = `
+                    <p><span class="info-label">类型：</span><span class="info-value">${pointData.type}</span></p>
+                    <p><span class="info-label">户主：</span><span class="info-value">${pointData.headOfHousehold || '无'}</span></p>
+                    <p><span class="info-label">面积：</span><span class="info-value">${pointData.area || '无'}</span></p>
+                    <p><span class="info-label">是否流转：</span><span class="info-value">${pointData.flowOrNot || '未知'}</span></p>
+                    <p><span class="info-label">是否有房：</span><span class="info-value">${pointData.haveAHomeOrNot || '未知'}</span></p>
+                    <p><span class="info-label">简介：</span><span class="info-value">${pointData.desc || '无'}</span></p>
+                `;
+            }else if (pointData.type === '村委会') {
+                contentDiv.innerHTML = `
+                    <p><span class="info-label">类型：</span><span class="info-value">${pointData.type}</span></p>
+                    <p><span class="info-label">面积：</span><span class="info-value">${pointData.area || '无'}</span></p>
+                    <p><span class="info-label">耕地面积：</span><span class="info-value">${pointData.ploughArea || '无'}</span></p>
+                    <p><span class="info-label">常住人口：</span><span class="info-value">${pointData.permanentResidentPopulation || '无'}</span></p>
+                    <p><span class="info-label">村集体成员：</span><span class="info-value">${pointData.members || '无'}</span></p>
+                    <p><span class="info-label">党员人数：</span><span class="info-value">${pointData.partyMember || '无'}</span></p>
+                    <p><span class="info-label">简介：</span><span class="info-value">${pointData.desc || '无'}</span></p>
+                `;
+            } else {
+                contentDiv.innerHTML = `
+                    <p><span class="info-label">类型：</span><span class="info-value">${pointData.type}</span></p>
+                    <p><span class="info-label">面积：</span><span class="info-value">${pointData.area || '无'}</span></p>
+                    <p><span class="info-label">年产量：</span><span class="info-value">${pointData.output || '无'}</span></p>
+                    <p><span class="info-label">简介：</span><span class="info-value">${pointData.desc || '无'}</span></p>
+                `;
+            }
+
+            const coord = ol.proj.fromLonLat(pointData.coord);
+            pointInfoOverlay.setPosition(coord);
+
+            pointInfoElement.classList.remove('active');
+            void pointInfoElement.offsetWidth;
+            pointInfoElement.classList.add('active');
+        }
+
+        function hidePointInfo() {
+            if (pointInfoElement) {
+                pointInfoElement.classList.remove('active');
+            }
+            activePoint.name = '';
+            activePoint.config = null;
+        }
+
+        function hideRouteInfo() {
+            if (routeInfoElement) {
+                routeInfoElement.classList.remove('active');
+            }
+            if (routeInfoOverlay) {
+                routeInfoOverlay.setPosition(undefined);
+            }
+        }
+
+        function calculateRoute(endPointName, locConfig) {
+            const startConfig = locConfig["操场河村委会"];
+            const startGCJ = startConfig.coord;
+            const endConfig = locConfig[endPointName];
+            const endGCJ = endConfig.coord;
+
+            if (routeLayer) {
+                map.removeLayer(routeLayer);
+                routeLayer = null;
+            }
+
+            hidePointInfo();
+
+            document.getElementById('route-start').textContent = "操场河村委会";
+            document.getElementById('route-end').textContent = endPointName;
+
+            const url = `https://restapi.amap.com/v3/direction/driving?` +
+                `origin=${startGCJ[0]},${startGCJ[1]}&` +
+                `destination=${endGCJ[0]},${endGCJ[1]}&` +
+                `key=${AMAP_KEY}&` +
+                `output=json&` +
+                `extensions=all`;
+
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP 错误：${response.status}`);
+                    return response.json();
+                })
+                .then(data => {
+                    if (data && data.status === '1' && data.route && data.route.paths && data.route.paths.length > 0) {
+                        const path = data.route.paths[0];
+                        const distance = Number(path.distance) / 1000;
+                        const duration = path.duration ? Number(path.duration) : distance * 120;
+
+                        document.getElementById('route-distance').textContent = `${distance.toFixed(1)} km`;
+                        document.getElementById('route-time').textContent = `${Math.round(duration/60)}分钟`;
+
+                        let allCoordinates = [];
+                        if (path.polyline) {
+                            const coords = AMap.Polyline.decode(path.polyline);
+                            coords.forEach(coord => {
+                                allCoordinates.push(ol.proj.fromLonLat([coord.lng, coord.lat]));
+                            });
+                        } else {
+                            allCoordinates = [
+                                ol.proj.fromLonLat([startGCJ[0], startGCJ[1]]),
+                                ol.proj.fromLonLat([endGCJ[0], endGCJ[1]])
+                            ];
+                        }
+
+                        routeLayer = new ol.layer.Vector({
+                            source: new ol.source.Vector({
+                                features: [new ol.Feature({
+                                    geometry: new ol.geom.LineString(allCoordinates)
+                                })]
+                            }),
+                            style: new ol.style.Style({
+                                stroke: new ol.style.Stroke({
+                                    color: '#ff4444',
+                                    width: 5,
+                                    lineDash: [10, 5]
+                                })
+                            })
+                        });
+                        map.addLayer(routeLayer);
+
+                        if (allCoordinates.length > 0) {
+                            const routeExtent = new ol.extent.boundingExtent(allCoordinates);
+                            map.getView().fit(routeExtent, { padding: [80, 50, 120, 50], duration: 1000 });
+
+                            const midIndex = Math.floor(allCoordinates.length / 2);
+                            const midCoord = allCoordinates[midIndex];
+
+                            setTimeout(() => {
+                                routeInfoOverlay.setPosition(midCoord);
+                                routeInfoElement.classList.remove('active');
+                                void routeInfoElement.offsetWidth;
+                                routeInfoElement.classList.add('active');
+                            }, 500);
+                        }
+                    } else {
+                        alert(`无法获取路线信息：${data?.info || '未知错误'}`);
+                    }
+                })
+                .catch(error => {
+                    console.error('路线规划请求失败:', error);
+                    alert(`路线规划请求失败：${error.message}`);
+                });
+        }
+
+        console.log('地图初始化完成，所有点位已添加');
+    };
+
+    window.addEventListener('message', function(event) {
+        if (event.origin !== 'https://modao.cc' && event.origin !== 'https://www.modao.cc') return;
+        if (!map) return;
+        if (event.data.action === 'zoomIn') {
+            const currentZoom = map.getView().getZoom();
+            if (currentZoom < map.getView().getMaxZoom()) map.getView().setZoom(currentZoom + 1);
+        } else if (event.data.action === 'zoomOut') {
+            const currentZoom = map.getView().getZoom();
+            if (currentZoom > map.getView().getMinZoom()) map.getView().setZoom(currentZoom - 1);
+        }
+    }, false);
+</script>
+</body>
+</html>
